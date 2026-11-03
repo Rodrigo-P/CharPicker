@@ -1,0 +1,131 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CharPicker — Random Character Generator</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <header class="header">
+        <a href="/" class="logo">CharPicker<span>.</span></a>
+        <div class="database-count">
+            {{ "{:,}".format(total) }} characters available
+        </div>
+    </header>
+
+    <main class="container">
+
+        <section class="hero">
+            <div class="eyebrow">RANDOM CHARACTER GENERATOR</div>
+
+            <h1>Who's your next<br>
+                <span>character?</span>
+            </h1>
+
+            <p class="description">
+                Discover fictional characters from movies, television,
+                books, anime, comics and video games.
+            </p>
+
+            <form method="POST" class="controls">
+
+                <label for="count">Number of characters</label>
+
+                <div class="control-row">
+
+                    <select name="count" id="count">
+                        {% for n in [5, 10, 20, 50] %}
+                            <option value="{{ n }}"
+                                {% if count == n %}selected{% endif %}>
+                                {{ n }} characters
+                            </option>
+                        {% endfor %}
+                    </select>
+
+                    <button type="submit">
+                        <span>↻</span> Generate
+                    </button>
+
+                </div>
+
+            </form>
+        </section>
+
+        <section class="results">
+
+            <div class="results-header">
+                <h2>Your characters</h2>
+                <span>{{ characters|length }} results</span>
+            </div>
+
+            <div class="character-grid">
+
+                {% for character in characters %}
+
+                    <article class="character-card">
+
+                        <a href="{{ character.url }}"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           class="image-link">
+
+                            <img
+                                src="{{ character.image }}"
+                                alt="{{ character.name }}"
+                                loading="lazy"
+                                referrerpolicy="no-referrer"
+                            >
+
+                        </a>
+
+                        <div class="card-info">
+
+                            <h3>{{ character.name }}</h3>
+
+                            <a href="{{ character.url }}"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               class="wiki-link">
+                                Wikipedia ↗
+                            </a>
+
+                        </div>
+
+                    </article>
+
+                {% endfor %}
+
+            </div>
+
+            {% if not characters %}
+                <div class="empty-state">
+                    No characters found.
+                </div>
+            {% endif %}
+
+            <div class="bottom-action">
+                <button
+                    onclick="window.scrollTo({top: 0, behavior: 'smooth'})"
+                    class="back-top">
+                    ↑ Back to generator
+                </button>
+            </div>
+
+        </section>
+
+    </main>
+
+    <footer>
+        <p>CharPicker · Discover something new.</p>
+        <p>Character images and information sourced from Wikipedia.</p>
+    </footer>
+
+</body>
+</html>
