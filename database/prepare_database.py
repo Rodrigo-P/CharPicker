@@ -392,7 +392,7 @@ def prepare_database():
 
             # Progress reporting
 
-            if index % 250 == 0 or index == len(characters):
+            if index % 100 == 0 or index == len(characters):
 
                 elapsed = time.perf_counter() - processing_start
 

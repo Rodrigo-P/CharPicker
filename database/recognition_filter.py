@@ -30,15 +30,15 @@ class ClassificationResponse(BaseModel):
 
 
 SYSTEM_PROMPT = """
-Select fictional characters for an Akinator-style guessing game aimed at people younger than 35 in Brazil.
+Select fictional characters for an Akinator-style guessing game aimed at Brazilian players aged 18–34.
 
-Would a young (12 to 35) Brazilian player reasonably recognize or identify this character through yes/no questions?
+Would a young Brazilian player reasonably recognize or identify this character through yes/no questions?
 
 KEEP:
 - Characters from popular movies, TV, animation, anime, comics and video games.
 - Recognizable supporting characters.
 - Older characters that remain relevant through modern entertainment or popular culture.
-- Iconic literary and mythological characters with   meaningful contemporary recognition.
+- Iconic literary and mythological characters with meaningful contemporary recognition.
 
 EXCLUDE:
 - Obscure characters primarily known through classical literature, theatre or mythology.
@@ -47,6 +47,9 @@ EXCLUDE:
 - Characters primarily remembered by older generations.
 - Niche characters known mainly to dedicated fans.
 - Literary archetypes or generic character categories rather than independently recognizable individuals.
+- Internet personalities and satirical fictional characters whose recognition is limited to niche online communities or specific foreign political contexts.
+- Fictional political figures whose appeal depends on familiarity with another country's political culture.
+
 
 OLDER CHARACTERS:
 
@@ -56,9 +59,13 @@ Modern entertainment exposure is strong evidence, but not mandatory. Historical 
 
 FAME IS NOT ENOUGH:
 
+Popularity within a dedicated fanbase does not imply broad public recognition.
+A character should be recognizable beyond the people who follow its specific franchise, fandom or community.
+Do not confuse a character being well-known by name with being recognizable as an individual through distinctive traits, appearance or identity.
+
 Historical importance, literary fame, cult status or international recognition do not guarantee recognition among younger Brazilians.
 
-A character should ideally be recognizable without requiring knowledge of a specific classic book, old movie or TV show.
+A character should ideally be recognizable without requiring knowledge of its original work.
 
 Prefer characters with recognizable identities in contemporary mainstream entertainment.
 
@@ -70,10 +77,19 @@ Dracula, Sherlock Holmes, Batman, Aladdin, Sweeney Todd, Amaterasu, Bluto.
 EXCLUDE:
 Billy Budd, Black Beauty, Blanche DuBois, Bob Cratchit, Lady Macbeth, Banquo, Lugh, Medea, Harlequin, Brighella, Humbaba, Don Juan, Fantômas, Fonzie, Jean Valjean, Scarlett O'Hara.
 
-Bond girl is a category, not an individual character.
-R.O.B. is too niche for the target audience.
+CULTURAL AND GENERATIONAL RELEVANCE:
 
-Prioritize Brazilian mainstream familiarity and international popular entertainment over historical or academic importance.
+Consider the target audience's cultural background.
+Characters and cultural icons strongly associated with older generations or specific foreign historical contexts should generally be excluded unless they remain recognizable among younger Brazilians.
+
+Historical or international fame does not imply recognition in Brazil.
+
+Example:
+- Rosie the Riveter: EXCLUDE (primarily an American WWII-era cultural icon with limited relevance to younger Brazilians).
+- R.O.B. is too niche for the target audience.
+
+Prioritize Brazilian mainstream familiarity and worldwide popular entertainment over historical or academic importance.
+Exclude characters whose recognition depends primarily on familiarity with foreign historical, political or cultural contexts that are not widely understood in Brazil.
 
 Do not invent popularity.
 
@@ -81,7 +97,6 @@ Return exactly one result per candidate.
 Preserve names exactly.
 Return JSON matching the supplied schema.
 """
-
 
 
 def load_json(path):
@@ -196,7 +211,13 @@ def save_selection(characters, cache):
             )
 
         elif result["decision"] == "keep":
-            kept.append(character)
+            kept.append(
+                {
+                    "name": name,
+                    "image": character.get("image"),
+                    "url": character.get("url"),
+                }
+            )
 
         elif result["decision"] == "exclude":
             excluded.append(

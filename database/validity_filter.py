@@ -28,16 +28,14 @@ class ClassificationResponse(BaseModel):
 
 
 SYSTEM_PROMPT = """
-Determine whether each Wikipedia article describes one
-specific individual fictional character.
+Determine whether each Wikipedia article describes one specific individual fictional character.
 
 VALID:
 - A specific fictional individual from any medium.
 - Literary and mythological individuals.
 - Supporting characters.
 - Fictional animals and creatures.
-- Named stock characters, if they represent a specific
-  established fictional individual.
+- Named stock characters, if they represent a specific established fictional individual.
 
 INVALID:
 - Real people, authors and actors.
@@ -48,10 +46,25 @@ INVALID:
 - Groups or classes of characters rather than individuals.
 - Articles about fictional works rather than their characters.
 
+VISUAL REPRESENTATION:
+
+For characters originating in literary works, require at least one visual adaptation outside theatre, such as:
+- Movies or television.
+- Animation or anime.
+- Comics or graphic novels.
+- Video games.
+
+Exclude literary characters known only through written works or theatrical performances.
+
+The adaptation must provide an identifiable visual depiction suitable for use as a guessing-game picture.
+
+The adaptation does not need to be popular or recognizable.
+Popularity and recognizability belong to the separate recognition filter.
+
+
 IMPORTANT DISTINCTION:
 
-The article must describe an individual character,
-not a type of character or a category of fictional roles.
+The article must describe an individual character, not a type of character or a category of fictional roles.
 
 Examples:
 - Sherlock Holmes: VALID (specific fictional individual).
