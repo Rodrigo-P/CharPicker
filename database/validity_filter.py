@@ -7,14 +7,17 @@ from typing import Literal
 from ollama import chat
 from pydantic import BaseModel
 
-MODEL = "deepseek-r1:14b"
+MODEL = "qwen3-14b-q5"
+
 INPUT_FILE = "database/characters.json"
 CACHE_FILE = "database/validity_cache.json"
 
 OUTPUT_VALID = "database/characters_valid.json"
 OUTPUT_INVALID = "database/characters_invalid.json"
 
-BATCH_SIZE = 20
+BATCH_SIZE = 15
+
+OLLAMA_OPTIONS = {"temperature": 0, "num_ctx": 8192, "num_predict": 4096}
 
 
 class EntityResult(BaseModel):
@@ -30,21 +33,41 @@ class ClassificationResponse(BaseModel):
 SYSTEM_PROMPT = """
 Determine whether each Wikipedia article describes one specific individual fictional character.
 
+The objective is to identify fictional individuals, NOT to evaluate their popularity, recognition, importance or cultural relevance.
+
 VALID:
-- A specific fictional individual from any medium.
+- Specific fictional individuals from any medium.
 - Literary and mythological individuals.
 - Supporting characters.
 - Fictional animals and creatures.
-- Named stock characters, if they represent a specific established fictional individual.
+- Named traditional or stock characters when they represent an established individual fictional identity.
+- Characters from obscure, old or niche fictional works.
 
 INVALID:
 - Real people, authors and actors.
 - Books, novels, series, movies and franchises.
 - Places, organizations, businesses and events.
-- Cultural symbols and concepts.
+- Cultural symbols and abstract concepts.
 - Character categories, archetypes and generic roles.
 - Groups or classes of characters rather than individuals.
-- Articles about fictional works rather than their characters.
+- Articles describing fictional works rather than their characters.
+- Generic species or creature types without an individual identity.
+
+INDIVIDUAL IDENTITY:
+
+The entity must represent a particular fictional individual, not merely a type of person, creature, role or recurring character.
+
+A character does not need a unique personal name if it has an established individual identity.
+
+Traditional characters require special attention:
+- Harlequin: VALID (established individual traditional character).
+- Pierrot: VALID (established individual traditional character).
+- Bond girl: INVALID (generic category).
+- Final girl: INVALID (narrative archetype).
+- Superhero: INVALID (generic role).
+- Disney Princess: INVALID (character category).
+
+Do not automatically exclude traditional characters merely because multiple works portray different versions of them.
 
 VISUAL REPRESENTATION:
 
@@ -56,29 +79,33 @@ For characters originating in literary works, require at least one visual adapta
 
 Exclude literary characters known only through written works or theatrical performances.
 
-The adaptation must provide an identifiable visual depiction suitable for use as a guessing-game picture.
+The adaptation must provide an identifiable visual depiction suitable for a guessing-game picture.
 
-The adaptation does not need to be popular or recognizable.
-Popularity and recognizability belong to the separate recognition filter.
+The adaptation does NOT need to be popular, recent or recognizable.
+Popularity and recognizability belong to a separate filter.
 
+Characters originating in cinema, television, animation, anime, comics or video games do not need additional adaptations.
 
-IMPORTANT DISTINCTION:
+MYTHOLOGICAL CHARACTERS:
 
-The article must describe an individual character, not a type of character or a category of fictional roles.
+Individual mythological gods, heroes, monsters and creatures are VALID even when they originate in ancient mythology.
 
-Examples:
-- Sherlock Holmes: VALID (specific fictional individual).
-- Harlequin: VALID (specific traditional character).
-- Bond girl: INVALID (generic category of characters).
-- Final girl: INVALID (character archetype).
-- Superhero: INVALID (generic character category).
-- Disney Princess: INVALID (character category).
+However, generic mythological creature types, abstract concepts and symbolic representations are INVALID unless they represent a specific established individual.
 
-Use Wikidata descriptions and entity types as evidence.
+EVIDENCE:
 
-Ignore popularity, age and modern relevance.
-A character can be obscure or ancient and still be valid.
+Use the supplied Wikidata description and entity types as evidence.
 
+Do not assume an entity is fictional merely because its name sounds like a character.
+
+If the available information is insufficient to establish that the article describes an individual fictional character, classify it as invalid.
+
+Ignore popularity, age, recognition and modern relevance.
+
+A character can be obscure, ancient or culturally unfamiliar and still be valid.
+
+Reasons must be concise, ideally one sentence and no more than 20 words.
+Do not provide lengthy explanations.
 Return exactly one result per candidate.
 Preserve names exactly.
 Return JSON matching the supplied schema.
@@ -140,15 +167,15 @@ def classify_batch(characters):
             {
                 "role": "user",
                 "content": (
+                    "\\no_think\n"
                     "Classify every candidate:\n"
                     + json.dumps(candidates, ensure_ascii=False)
                 ),
             },
         ],
         format=ClassificationResponse.model_json_schema(),
-        options={"temperature": 0},
+        options=OLLAMA_OPTIONS,
     )
-
     parsed = ClassificationResponse.model_validate_json(response.message.content)
 
     lookup = {normalize_name(n): n for n in names}
@@ -163,7 +190,11 @@ def classify_batch(characters):
             data["name"] = name
             results[name] = data
 
-    missing = [c for c in characters if get_name(c) not in results]
+    missing = [
+        c
+        for c in characters
+        if normalize_name(get_name(c)) not in {normalize_name(name) for name in results}
+    ]
 
     for character in missing:
         name = get_name(character)
@@ -187,11 +218,11 @@ def classify_single(character):
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": json.dumps(candidate, ensure_ascii=False),
+                "content": ("\\no_think\n" + json.dumps(candidate, ensure_ascii=False)),
             },
         ],
         format=EntityResult.model_json_schema(),
-        options={"temperature": 0},
+        options=OLLAMA_OPTIONS,
     )
 
     result = EntityResult.model_validate_json(response.message.content)

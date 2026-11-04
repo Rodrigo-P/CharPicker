@@ -115,7 +115,7 @@ db.commit()
 
 def api_request(params, endpoint=API):
 
-    params = {**params, "format": "json", "maxlag": 10}
+    params = {**params, "format": "json", "maxlag": 20}
 
     for attempt in range(MAX_RETRIES):
 
@@ -242,7 +242,7 @@ WIKIDATA_MAX_RETRIES = 8
 
 def wikidata_request(params):
 
-    params = {**params, "format": "json", "maxlag": 10}
+    params = {**params, "format": "json", "maxlag": 20}
 
     for attempt in range(WIKIDATA_MAX_RETRIES):
 

@@ -6,7 +6,7 @@ from typing import Literal
 from ollama import chat
 from pydantic import BaseModel
 
-MODEL = "deepseek-r1:14b"
+MODEL = "qwen3-14b-q5"
 
 INPUT_FILE = "database/characters_valid.json"
 CACHE_FILE = "database/recognition_cache.json"
@@ -15,7 +15,10 @@ OUTPUT_KEEP = "database/characters_filtered.json"
 OUTPUT_EXCLUDE = "database/characters_excluded.json"
 OUTPUT_UNCERTAIN = "database/characters_uncertain.json"
 
-BATCH_SIZE = 15
+BATCH_SIZE = 10
+
+
+OLLAMA_OPTIONS = {"temperature": 0, "num_ctx": 8192, "num_predict": 8192}
 
 
 class RecognitionResult(BaseModel):
@@ -32,67 +35,131 @@ class ClassificationResponse(BaseModel):
 SYSTEM_PROMPT = """
 Select fictional characters for an Akinator-style guessing game aimed at Brazilian players aged 18–34.
 
-Would a young Brazilian player reasonably recognize or identify this character through yes/no questions?
+TARGET AUDIENCE:
+
+Assume players understand English and are reasonably internet-savvy.
+They are familiar with international entertainment, gaming, anime,
+movies, television and mainstream online culture.
+
+Do not restrict recognition to Brazilian mainstream media.
+International characters can qualify if they have meaningful
+recognition among young, English-speaking and internet-active audiences.
+
+CORE QUESTION:
+
+Would a reasonably knowledgeable but non-specialist young Brazilian
+recognize this SPECIFIC CHARACTER through yes/no questions?
+
+Evaluate recognition of the individual character, not just their
+original work, franchise or cultural significance.
 
 KEEP:
 - Characters from popular movies, TV, animation, anime, comics and video games.
 - Recognizable supporting characters.
-- Older characters that remain relevant through modern entertainment or popular culture.
-- Iconic literary and mythological characters with meaningful contemporary recognition.
+- Characters with meaningful international or Brazilian mainstream recognition.
+- Iconic literary, folkloric and mythological characters with enduring recognition.
+- Older characters with strong cross-generational recognition.
+- Characters with widespread recognition through internet culture.
 
 EXCLUDE:
 - Obscure characters primarily known through classical literature, theatre or mythology.
-- Characters with little recognition among younger Brazilians.
-- Traditional theatrical stock characters without contemporary mainstream recognition.
+- Characters known mainly to dedicated fans or niche communities.
+- Traditional theatrical stock characters without broader recognition.
 - Characters primarily remembered by older generations.
-- Niche characters known mainly to dedicated fans.
-- Literary archetypes or generic character categories rather than independently recognizable individuals.
-- Internet personalities and satirical fictional characters whose recognition is limited to niche online communities or specific foreign political contexts.
-- Fictional political figures whose appeal depends on familiarity with another country's political culture.
+- Generic character categories, archetypes and literary roles.
+- Internet personalities and satirical fictional characters limited to niche communities or specific foreign political contexts.
+- Fictional political figures whose recognition depends on familiarity with another country's political culture.
 
+INDIVIDUAL CHARACTER RECOGNITION:
 
-OLDER CHARACTERS:
+Evaluate every character individually.
 
-Older characters require additional scrutiny.
+A famous franchise does not make all its characters recognizable.
+A popular or critically acclaimed series does not automatically
+make all its characters mainstream.
 
-Modern entertainment exposure is strong evidence, but not mandatory. Historical fame or multiple adaptations alone are not sufficient.
+Be particularly careful with:
+- Individual incarnations of characters with multiple versions.
+- Supporting characters from television series.
+- Characters from older franchises without enduring recognition.
+- Characters whose recognition is restricted to people familiar
+  with specific episodes, storylines or adaptations.
 
-FAME IS NOT ENOUGH:
+A character should ideally be recognizable through distinctive
+appearance, identity or characteristics, beyond dedicated fans.
 
-Popularity within a dedicated fanbase does not imply broad public recognition.
-A character should be recognizable beyond the people who follow its specific franchise, fandom or community.
-Do not confuse a character being well-known by name with being recognizable as an individual through distinctive traits, appearance or identity.
+CULTURAL AND GENERATIONAL RECOGNITION:
 
-Historical importance, literary fame, cult status or international recognition do not guarantee recognition among younger Brazilians.
+Consider Brazilian familiarity, international entertainment
+and the target audience's online habits.
 
-A character should ideally be recognizable without requiring knowledge of its original work.
+Characters can qualify through:
+- Popular English-language entertainment.
+- Internationally successful movies and television.
+- Gaming and anime culture.
+- Widely circulated memes, YouTube content and viral references.
+- Enduring cross-generational cultural recognition.
+- Popular adaptations of older literary or mythological characters.
 
-Prefer characters with recognizable identities in contemporary mainstream entertainment.
+Older characters do not necessarily need recent appearances.
+However, historical importance, literary fame, cult status,
+multiple adaptations or international fame alone are insufficient.
 
-Examples:
+Folklore and mythology do not automatically imply recognition.
+A character's importance in its country of origin does not
+establish familiarity among young Brazilians.
+
+Niche internet references, specialized fandoms and obscure
+cultural references are insufficient.
+
+EXAMPLES:
 
 KEEP:
-Dracula, Sherlock Holmes, Batman, Aladdin, Sweeney Todd, Amaterasu, Bluto.
+Dracula, Sherlock Holmes, Batman, Aladdin, Sweeney Todd,
+Amaterasu, Bluto, Merlin, Indiana Jones,
+Alice (Alice's Adventures in Wonderland), Mowgli.
 
 EXCLUDE:
-Billy Budd, Black Beauty, Blanche DuBois, Bob Cratchit, Lady Macbeth, Banquo, Lugh, Medea, Harlequin, Brighella, Humbaba, Don Juan, Fantômas, Fonzie, Jean Valjean, Scarlett O'Hara.
+Billy Budd, Black Beauty, Blanche DuBois, Bob Cratchit,
+Lady Macbeth, Banquo, Lugh, Medea, Harlequin, Brighella,
+Humbaba, Don Juan, Fantômas, Fonzie, Jean Valjean,
+Scarlett O'Hara.
 
-CULTURAL AND GENERATIONAL RELEVANCE:
+ADDITIONAL EXCLUDE EXAMPLES:
+- Seventh Doctor: Individual incarnation primarily recognized by Doctor Who fans.
+- Second Doctor: Individual incarnation primarily recognized by Doctor Who fans.
+- Befana: Italian folkloric figure without sufficient mainstream recognition in Brazil.
+- Roxie Hart: Recognition concentrated among Chicago and musical theatre audiences.
+- Robot (Lost in Space): Older television character with limited contemporary relevance.
+- Rust Cohle: Recognition concentrated among True Detective viewers.
+- Baron Munchausen: Historical and literary fame does not establish contemporary recognition.
+- Rosie the Riveter: Primarily an American WWII-era cultural icon.
+- R.O.B.: Too niche for the target audience.
 
-Consider the target audience's cultural background.
-Characters and cultural icons strongly associated with older generations or specific foreign historical contexts should generally be excluded unless they remain recognizable among younger Brazilians.
+DECISION STANDARD:
 
-Historical or international fame does not imply recognition in Brazil.
+Be conservative, but not excessively restrictive.
 
-Example:
-- Rosie the Riveter: EXCLUDE (primarily an American WWII-era cultural icon with limited relevance to younger Brazilians).
-- R.O.B. is too niche for the target audience.
+When recognition is uncertain, consider:
+- Cross-generational cultural familiarity.
+- Popular adaptations.
+- International mainstream exposure.
+- Widespread online recognition.
+- The character's distinctive and established identity.
 
-Prioritize Brazilian mainstream familiarity and worldwide popular entertainment over historical or academic importance.
-Exclude characters whose recognition depends primarily on familiarity with foreign historical, political or cultural contexts that are not widely understood in Brazil.
+Do not exclude a character simply because its original work
+is old or its recent exposure is limited.
 
-Do not invent popularity.
+Do not assume that franchise popularity, historical importance
+or niche online popularity guarantees recognition.
 
+Exclude when there is insufficient reason to expect meaningful
+recognition among young Brazilian adults.
+
+Avoid both speculative inclusions and excessively restrictive exclusions.
+
+Reasons must be concise, ideally one sentence and no more than 20 words.
+Do not provide lengthy explanations.
 Return exactly one result per candidate.
 Preserve names exactly.
 Return JSON matching the supplied schema.
@@ -133,14 +200,19 @@ def classify_batch(characters):
             {
                 "role": "user",
                 "content": (
-                    "Classify every character below:\n"
+                    "Classify every character below. "
+                    "Return exactly one result per character.\n"
                     + json.dumps(names, ensure_ascii=False)
+                    + "\n\\no_think"
                 ),
             },
         ],
         format=ClassificationResponse.model_json_schema(),
-        options={"temperature": 0},
+        options=OLLAMA_OPTIONS,
     )
+    print("Done reason:", response.done_reason)
+    print("Prompt tokens:", response.prompt_eval_count)
+    print("Generated tokens:", response.eval_count)
 
     parsed = ClassificationResponse.model_validate_json(response.message.content)
 
@@ -176,11 +248,11 @@ def classify_single(character):
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Classify this character: {name}",
+                "content": f"Classify this character: {name}\n\\no_think",
             },
         ],
         format=RecognitionResult.model_json_schema(),
-        options={"temperature": 0},
+        options=OLLAMA_OPTIONS,
     )
 
     result = RecognitionResult.model_validate_json(response.message.content)
