@@ -8,8 +8,8 @@ API = "https://en.wikipedia.org/w/api.php"
 
 ROOT_CATEGORY = "Category:Fictional characters"
 
-DB_FILE = "characters.db"
-JSON_FILE = "characters.json"
+DB_FILE = "database\\characters.db"
+JSON_FILE = "database\\characters.json"
 
 db = sqlite3.connect(DB_FILE)
 
@@ -18,27 +18,35 @@ db = sqlite3.connect(DB_FILE)
 # -------------------------
 
 
-def export_json():
+def export_characters():
 
     rows = db.execute("""
-        SELECT title, image, url
+        SELECT
+            title,
+            image,
+            url,
+            wikidata_id,
+            description,
+            entity_types
         FROM characters
-        ORDER BY title
     """).fetchall()
 
-    results = [
-        {
-            "name": r[0],
-            "image": r[1],
-            "url": r[2],
-        }
-        for r in rows
-    ]
+    characters = []
+
+    for row in rows:
+        characters.append(
+            {
+                "name": row[0],
+                "image": row[1],
+                "url": row[2],
+                "wikidata_id": row[3],
+                "description": row[4],
+                "entity_types": row[5],
+            }
+        )
 
     with open(JSON_FILE, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-
-    print(f"\nExported {len(results)} characters.")
+        json.dump(characters, f, ensure_ascii=False, indent=2)
 
 
 # -------------------------
@@ -47,4 +55,4 @@ def export_json():
 
 if __name__ == "__main__":
 
-    export_json()
+    export_characters()

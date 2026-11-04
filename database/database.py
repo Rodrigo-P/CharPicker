@@ -4,6 +4,7 @@ import time
 import random
 import json
 
+WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 API = "https://en.wikipedia.org/w/api.php"
 
 ROOT_CATEGORY = "Category:Fictional characters"
@@ -55,9 +56,30 @@ CREATE TABLE IF NOT EXISTS characters (
     width INTEGER,
     height INTEGER,
     mime TEXT,
-    size INTEGER
+    size INTEGER,
+    wikidata_id TEXT,
+    description TEXT,
+    entity_types TEXT DEFAULT '[]',
+    wikidata_processed INTEGER DEFAULT 0
 )
 """)
+
+db.execute("""
+CREATE TABLE IF NOT EXISTS wikidata_entity_cache (
+    wikidata_id TEXT PRIMARY KEY,
+    description TEXT,
+    claims TEXT
+)
+""")
+
+db.execute("""
+CREATE TABLE IF NOT EXISTS wikidata_type_cache (
+    wikidata_id TEXT PRIMARY KEY,
+    label TEXT
+)
+""")
+
+db.commit()
 
 # Migrate older databases
 existing_columns = {row[1] for row in db.execute("PRAGMA table_info(characters)")}
@@ -67,6 +89,10 @@ for column, definition in [
     ("height", "INTEGER"),
     ("mime", "TEXT"),
     ("size", "INTEGER"),
+    ("wikidata_id", "TEXT"),
+    ("description", "TEXT"),
+    ("entity_types", "TEXT DEFAULT '[]'"),
+    ("wikidata_processed", "INTEGER DEFAULT 0"),
 ]:
     if column not in existing_columns:
         db.execute(f"ALTER TABLE characters ADD COLUMN {column} {definition}")
@@ -87,14 +113,14 @@ db.commit()
 # -------------------------
 
 
-def api_request(params):
+def api_request(params, endpoint=API):
 
-    params = {**params, "format": "json", "maxlag": 5}
+    params = {**params, "format": "json", "maxlag": 10}
 
     for attempt in range(MAX_RETRIES):
 
         try:
-            response = session.get(API, params=params, timeout=30)
+            response = session.get(endpoint, params=params, timeout=30)
 
             if response.status_code in (429, 503):
 
@@ -204,6 +230,302 @@ def is_good_image(metadata):
         return False
 
     return True
+
+
+# -------------------------
+# Wikidata enrichment
+# -------------------------
+
+WIKIDATA_DELAY = 5
+WIKIDATA_MAX_RETRIES = 8
+
+
+def wikidata_request(params):
+
+    params = {**params, "format": "json", "maxlag": 10}
+
+    for attempt in range(WIKIDATA_MAX_RETRIES):
+
+        try:
+            response = session.get(WIKIDATA_API, params=params, timeout=60)
+            if response.status_code in (429, 503):
+
+                retry_after = response.headers.get("Retry-After")
+
+                wait = (
+                    float(retry_after) if retry_after else min(300 * (2**attempt), 3600)
+                )
+
+                print(
+                    f"Wikidata returned HTTP {response.status_code}. "
+                    f"Waiting {wait:.0f} seconds."
+                )
+
+                # Print response details for diagnosis
+                print("Response:", response.text[:500])
+
+                time.sleep(wait + random.uniform(5, 15))
+                continue
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if "error" in data:
+
+                error_code = data["error"].get("code")
+
+                if error_code == "maxlag":
+                    retry_after = response.headers.get("Retry-After")
+
+                    server_wait = float(retry_after) if retry_after else 5
+
+                    # Increase wait time after consecutive maxlag errors.
+                    wait = max(server_wait, 15 * (2**attempt))
+
+                    # Cap at 5 minutes.
+                    wait = min(wait, 300)
+
+                    print(
+                        f"Wikidata backend lag: "
+                        f"{data['error'].get('lag', 'unknown')}s. "
+                        f"Waiting {wait:.0f}s (attempt {attempt + 1})..."
+                    )
+
+                    time.sleep(wait + random.uniform(3, 8))
+                    continue
+
+                if error_code == "ratelimited":
+
+                    wait = min(300 * (2**attempt), 3600)
+
+                    print(f"Rate limited. Waiting {wait:.0f}s...")
+                    time.sleep(wait + random.uniform(5, 15))
+                    continue
+
+                raise RuntimeError(data["error"])
+
+            time.sleep(WIKIDATA_DELAY + random.uniform(1, 3))
+
+            return data
+
+        except requests.RequestException as error:
+
+            if attempt == WIKIDATA_MAX_RETRIES - 1:
+                raise
+
+            wait = min(300 * (2**attempt), 3600)
+
+            print(f"Wikidata request failed: {error}")
+            print(f"Waiting {wait:.0f} seconds...")
+
+            time.sleep(wait)
+
+    raise RuntimeError("Wikidata maximum retries exceeded")
+
+
+def enrich_wikidata(characters):
+
+    if not characters:
+        return characters
+
+    for i in range(0, len(characters), BATCH_SIZE):
+
+        batch = characters[i : i + BATCH_SIZE]
+
+        # STEP 1: Retrieve Wikidata IDs from Wikipedia
+
+        pageids = "|".join(str(character["pageid"]) for character in batch)
+
+        data = api_request(
+            {
+                "action": "query",
+                "pageids": pageids,
+                "prop": "pageprops",
+                "ppprop": "wikibase_item",
+            }
+        )
+
+        wikidata_ids = {}
+
+        for page in data.get("query", {}).get("pages", {}).values():
+
+            qid = page.get("pageprops", {}).get("wikibase_item")
+
+            if qid:
+                wikidata_ids[page["pageid"]] = qid
+
+        unique_ids = list(set(wikidata_ids.values()))
+
+        # STEP 2: Load cached entities
+
+        entities = {}
+
+        for qid, description, claims in db.execute("""
+            SELECT wikidata_id, description, claims
+            FROM wikidata_entity_cache
+        """).fetchall():
+
+            if qid in unique_ids:
+                entities[qid] = {
+                    "descriptions": (
+                        {"en": {"value": description}} if description else {}
+                    ),
+                    "claims": json.loads(claims),
+                }
+
+        # Only request missing entities
+
+        missing_ids = [qid for qid in unique_ids if qid not in entities]
+
+        for j in range(0, len(missing_ids), 50):
+
+            id_batch = missing_ids[j : j + 50]
+
+            entity_data = wikidata_request(
+                {
+                    "action": "wbgetentities",
+                    "ids": "|".join(id_batch),
+                    "props": "descriptions|claims",
+                    "languages": "en",
+                }
+            )
+
+            for qid, entity in entity_data.get("entities", {}).items():
+
+                description = entity.get("descriptions", {}).get("en", {}).get("value")
+
+                claims = entity.get("claims", {})
+
+                entities[qid] = {
+                    "descriptions": (
+                        {"en": {"value": description}} if description else {}
+                    ),
+                    "claims": claims,
+                }
+
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO wikidata_entity_cache
+                    (wikidata_id, description, claims)
+                    VALUES (?, ?, ?)
+                """,
+                    (qid, description, json.dumps(claims)),
+                )
+
+            db.commit()
+
+        # STEP 3: Collect instance-of IDs
+
+        type_ids = set()
+
+        for entity in entities.values():
+
+            for claim in entity.get("claims", {}).get("P31", []):
+
+                value = claim.get("mainsnak", {}).get("datavalue", {}).get("value", {})
+
+                if isinstance(value, dict) and value.get("id"):
+                    type_ids.add(value["id"])
+
+        # STEP 4: Load cached type labels
+
+        type_labels = {}
+
+        if type_ids:
+
+            placeholders = ",".join("?" for _ in type_ids)
+
+            rows = db.execute(
+                f"""
+                SELECT wikidata_id, label
+                FROM wikidata_type_cache
+                WHERE wikidata_id IN ({placeholders})
+            """,
+                list(type_ids),
+            ).fetchall()
+
+            type_labels = {qid: label for qid, label in rows}
+
+        missing_type_ids = [qid for qid in type_ids if qid not in type_labels]
+
+        # Fetch only type labels not already cached
+
+        for j in range(0, len(missing_type_ids), 50):
+
+            id_batch = missing_type_ids[j : j + 50]
+
+            type_data = wikidata_request(
+                {
+                    "action": "wbgetentities",
+                    "ids": "|".join(id_batch),
+                    "props": "labels",
+                    "languages": "en",
+                }
+            )
+
+            for qid, entity in type_data.get("entities", {}).items():
+
+                label = entity.get("labels", {}).get("en", {}).get("value")
+
+                if label:
+                    type_labels[qid] = label
+
+                    db.execute(
+                        """
+                        INSERT OR REPLACE INTO wikidata_type_cache
+                        (wikidata_id, label)
+                        VALUES (?, ?)
+                    """,
+                        (qid, label),
+                    )
+
+            db.commit()
+
+        # STEP 5: Attach metadata to characters
+
+        for character in batch:
+
+            pageid = character["pageid"]
+            qid = wikidata_ids.get(pageid)
+
+            character["wikidata_id"] = qid
+            character["description"] = None
+            character["entity_types"] = []
+            character["wikidata_processed"] = 1
+
+            if not qid or qid not in entities:
+                continue
+
+            entity = entities[qid]
+
+            character["description"] = (
+                entity.get("descriptions", {}).get("en", {}).get("value")
+            )
+
+            for claim in entity.get("claims", {}).get("P31", []):
+
+                value = claim.get("mainsnak", {}).get("datavalue", {}).get("value", {})
+
+                if not isinstance(value, dict):
+                    continue
+
+                type_id = value.get("id")
+
+                if not type_id:
+                    continue
+
+                character["entity_types"].append(
+                    {"id": type_id, "name": type_labels.get(type_id)}
+                )
+
+        print(
+            f"Wikidata enriched: "
+            f"{min(i + len(batch), len(characters))}"
+            f"/{len(characters)}"
+        )
+
+    return characters
 
 
 # -------------------------
@@ -404,17 +726,33 @@ def crawl():
         pages = get_members(category, "page")
 
         characters = get_article_images(pages)
+        characters = enrich_wikidata(characters)
 
         db.executemany(
             """
             INSERT OR IGNORE INTO characters
-            (pageid, title, image, url, width, height, mime, size)
+            (
+                pageid, title, image, url,
+                width, height, mime, size,
+                wikidata_id, description,
+                entity_types, wikidata_processed
+            )
             VALUES (
                 :pageid, :title, :image, :url,
-                :width, :height, :mime, :size
+                :width, :height, :mime, :size,
+                :wikidata_id, :description,
+                :entity_types, :wikidata_processed
             )
-        """,
-            characters,
+            """,
+            [
+                {
+                    **character,
+                    "entity_types": json.dumps(
+                        character["entity_types"], ensure_ascii=False
+                    ),
+                }
+                for character in characters
+            ],
         )
 
         db.execute(
@@ -438,12 +776,77 @@ def crawl():
 
 
 # -------------------------
-# Main
+# Enrich existing database
 # -------------------------
 
+
+def enrich_existing_database():
+
+    print("\nChecking existing characters for Wikidata metadata...")
+
+    while True:
+
+        rows = db.execute(
+            """
+            SELECT pageid, title, image, url, width, height, mime, size
+            FROM characters
+            WHERE wikidata_processed = 0
+            LIMIT ?
+        """,
+            (BATCH_SIZE,),
+        ).fetchall()
+
+        if not rows:
+            break
+
+        characters = [
+            {
+                "pageid": row[0],
+                "title": row[1],
+                "image": row[2],
+                "url": row[3],
+                "width": row[4],
+                "height": row[5],
+                "mime": row[6],
+                "size": row[7],
+            }
+            for row in rows
+        ]
+
+        characters = enrich_wikidata(characters)
+
+        db.executemany(
+            """
+            UPDATE characters
+            SET wikidata_id = :wikidata_id,
+                description = :description,
+                entity_types = :entity_types,
+                wikidata_processed = :wikidata_processed
+            WHERE pageid = :pageid
+        """,
+            [
+                {
+                    **character,
+                    "entity_types": json.dumps(
+                        character["entity_types"], ensure_ascii=False
+                    ),
+                }
+                for character in characters
+            ],
+        )
+
+        db.commit()
+
+    print("Existing database enrichment completed!")
+
+
+# -------------------------
+# Main
+# -------------------------
 if __name__ == "__main__":
 
     try:
+        enrich_existing_database()
         crawl()
 
     finally:
